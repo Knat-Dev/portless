@@ -4241,9 +4241,7 @@ async function handleNamedMode(args: string[]): Promise<void> {
 // ---------------------------------------------------------------------------
 
 async function main() {
-  // On Windows, setRawMode(false) installs a fixed console mode instead of
-  // restoring the original one, which clobbers the mode a child restored.
-  if (process.stdin.isTTY && !isWindows) {
+  if (process.stdin.isTTY) {
     process.on("exit", () => {
       try {
         process.stdin.setRawMode(false);
