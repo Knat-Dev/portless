@@ -272,7 +272,10 @@ function watchParentOnWindows(childPid: number): void {
       return [...found];
     };
     const timer = setInterval(() => {
-      if (alive(parent)) return;
+      if (alive(parent)) {
+        if (!alive(root)) process.exit(0);
+        return;
+      }
       clearInterval(timer);
       for (const pid of descendants()) spawnSync("taskkill", ["/T", "/F", "/PID", String(pid)], { stdio: "ignore", windowsHide: true });
       process.exit(0);
