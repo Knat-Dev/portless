@@ -22,6 +22,7 @@ if (-not (Test-Path "$Out\dev.pid")) { Rec "error" "dev server never started"; e
 $devPid = [int](Get-Content "$Out\dev.pid")
 Rec "dev_pid" $devPid
 Rec "mode_running" (ConMode)
+Get-CimInstance Win32_Process | Where-Object { $_.Name -in "node.exe","cmd.exe" } | Select-Object ProcessId, ParentProcessId, CommandLine | Format-List | Out-File -Encoding ascii "$Out\procs-running.txt"
 
 if ($Mode -eq "forcekill") {
   taskkill /F /PID $p.Id | Out-Null
@@ -29,6 +30,7 @@ if ($Mode -eq "forcekill") {
   $p.WaitForExit(30000) | Out-Null
 }
 Start-Sleep -Seconds 2
+Get-CimInstance Win32_Process | Where-Object { $_.Name -in "node.exe","cmd.exe" } | Select-Object ProcessId, ParentProcessId, CommandLine | Format-List | Out-File -Encoding ascii "$Out\procs-after.txt"
 Rec "portless_alive" ([bool](Get-Process -Id $p.Id -ErrorAction SilentlyContinue))
 Rec "dev_alive" ([bool](Get-Process -Id $devPid -ErrorAction SilentlyContinue))
 Rec "mode_after" (ConMode)
