@@ -1,0 +1,28 @@
+name: AB 437 windows tests
+
+on:
+  push:
+    branches: [railly/issue-437-windows-tree-kill]
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: ${{ matrix.ref }}
+    runs-on: windows-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        ref: [b52c2d6ed4abef51e69da841bcee3fc717820ce3, railly/fix-437-windows-orphans]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ matrix.ref }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .node-version
+      - uses: pnpm/action-setup@v4
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm build
+      - run: pnpm test
