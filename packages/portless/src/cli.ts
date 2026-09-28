@@ -1864,6 +1864,8 @@ ${colors.bold("Configuration (portless.json):")}
   Override name:   { "name": "myapp" }
   Override script: { "name": "myapp", "script": "start" }
   Monorepo:        { "apps": { "apps/web": { "name": "myapp" } } }
+  Turborepo:       Workspace roots use Turbo when turbo.json or turbo.jsonc is readable
+                   Set { "turbo": false } to use direct spawning
 
 ${colors.bold("In package.json:")}
   {
