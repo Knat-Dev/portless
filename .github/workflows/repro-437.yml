@@ -35,8 +35,12 @@ jobs:
         run: |
           $env:PNPM_HOME = "$env:LOCALAPPDATA\pnpm"
           $env:Path = "$env:PNPM_HOME\bin;$env:PNPM_HOME;$env:Path"
-          pnpm add -g portless@0.13.1
-          $cli = Join-Path (pnpm root -g) "portless\dist\cli.js"
+          Push-Location $env:RUNNER_TEMP; pnpm add -g portless@0.13.1; Pop-Location
+          Push-Location $env:RUNNER_TEMP
+          pnpm root -g
+          $cli = Get-ChildItem -Recurse -File -Filter cli.js $env:PNPM_HOME |
+            Where-Object { $_.FullName -match '\\portless\\dist\\cli\.js$' } | Select-Object -First 1 -ExpandProperty FullName
+          Pop-Location
           if (-not (Test-Path $cli)) { throw "missing $cli" }
           "CLI=$cli" | Out-File -Append -Encoding utf8 $env:GITHUB_ENV
 

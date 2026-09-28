@@ -14,7 +14,7 @@ $env:REPRO_OUT = $Out
 if ($Mode -eq "graceful") { $env:DEV_EXIT_AFTER_MS = "6000" }
 Rec "mode_before" (ConMode)
 
-$dev = Join-Path $PSScriptRoot "dev.js"
+$dev = Join-Path $PSScriptRoot "dev.cjs"
 $p = Start-Process -FilePath node -ArgumentList "`"$Cli`"", "demo", "--app-port", "$AppPort", "node", "`"$dev`"" -NoNewWindow -PassThru -RedirectStandardOutput "$Out\portless.out" -RedirectStandardError "$Out\portless.err"
 Rec "portless_pid" $p.Id
 for ($i = 0; $i -lt 120 -and -not (Test-Path "$Out\dev.pid"); $i++) { Start-Sleep -Milliseconds 250 }
