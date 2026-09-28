@@ -249,28 +249,41 @@ function killWindowsTree(pid: number): void {
 }
 
 /**
- * Kill the child tree if this process dies without running its own cleanup,
- * such as when it is terminated with `taskkill /F`. Windows does not end
- * children with their parent, so a detached watcher polls for our exit.
+ * Kill the command's descendants if this process dies without running its own
+ * cleanup, such as when it is terminated with `taskkill /F`. Windows does not
+ * end children with their parent, and the cmd.exe wrapper can exit alongside
+ * us, so a detached watcher walks ParentProcessId links from the wrapper pid
+ * (which survive the parent's exit) and only kills processes started after it.
  */
 function watchParentOnWindows(childPid: number): void {
   const script = `
-    const [parent, child] = process.argv.slice(1).map(Number);
+    const { spawnSync } = require("child_process");
+    const [parent, root, since] = process.argv.slice(1).map(Number);
     const alive = (pid) => { try { process.kill(pid, 0); return true; } catch { return false; } };
+    const descendants = () => {
+      const ps = "Get-CimInstance Win32_Process | ForEach-Object { '{0} {1} {2}' -f $_.ProcessId, $_.ParentProcessId, ([DateTimeOffset]$_.CreationDate).ToUnixTimeMilliseconds() }";
+      const out = spawnSync("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", ps], { encoding: "utf8", windowsHide: true }).stdout || "";
+      const rows = out.trim().split(/\\r?\\n/).map((l) => l.trim().split(" ").map(Number)).filter((r) => r.length === 3 && r[2] >= since);
+      const found = new Set([root]);
+      for (let grew = true; grew; ) {
+        grew = false;
+        for (const [pid, ppid] of rows) if (found.has(ppid) && !found.has(pid)) { found.add(pid); grew = true; }
+      }
+      return [...found];
+    };
     const timer = setInterval(() => {
-      if (!alive(child)) process.exit(0);
       if (alive(parent)) return;
       clearInterval(timer);
-      require("child_process").spawnSync("taskkill", ["/T", "/F", "/PID", String(child)], { stdio: "ignore", windowsHide: true });
+      for (const pid of descendants()) spawnSync("taskkill", ["/T", "/F", "/PID", String(pid)], { stdio: "ignore", windowsHide: true });
       process.exit(0);
     }, 500);
   `;
   try {
-    spawn(process.execPath, ["-e", script, String(process.pid), String(childPid)], {
-      detached: true,
-      stdio: "ignore",
-      windowsHide: true,
-    }).unref();
+    spawn(
+      process.execPath,
+      ["-e", script, String(process.pid), String(childPid), String(Date.now() - 1000)],
+      { detached: true, stdio: "ignore", windowsHide: true }
+    ).unref();
   } catch {
     // Best effort; normal shutdown still kills the tree.
   }
