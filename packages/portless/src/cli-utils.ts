@@ -196,11 +196,7 @@ function signalTrackedProcesses(
 ): void {
   if (isWindows) {
     for (const { pid } of tracked.values()) {
-      try {
-        process.kill(pid, signal);
-      } catch {
-        // Already dead
-      }
+      killWindowsTree(pid);
     }
     return;
   }
@@ -236,10 +232,55 @@ export function listenOnProxyInterface(
 }
 
 /**
+ * Kill a process and all of its descendants on Windows. Windows has no process
+ * groups, and child.kill() only terminates the cmd.exe wrapper, which leaves
+ * the dev server running and attached to the console.
+ */
+function killWindowsTree(pid: number): void {
+  try {
+    execFileSync("taskkill", ["/T", "/F", "/PID", String(pid)], {
+      stdio: "ignore",
+      timeout: PID_LOOKUP_TIMEOUT_MS,
+      windowsHide: true,
+    });
+  } catch {
+    // Already dead
+  }
+}
+
+/**
+ * Kill the child tree if this process dies without running its own cleanup,
+ * such as when it is terminated with `taskkill /F`. Windows does not end
+ * children with their parent, so a detached watcher polls for our exit.
+ */
+function watchParentOnWindows(childPid: number): void {
+  const script = `
+    const [parent, child] = process.argv.slice(1).map(Number);
+    const alive = (pid) => { try { process.kill(pid, 0); return true; } catch { return false; } };
+    const timer = setInterval(() => {
+      if (!alive(child)) process.exit(0);
+      if (alive(parent)) return;
+      clearInterval(timer);
+      require("child_process").spawnSync("taskkill", ["/T", "/F", "/PID", String(child)], { stdio: "ignore", windowsHide: true });
+      process.exit(0);
+    }, 500);
+  `;
+  try {
+    spawn(process.execPath, ["-e", script, String(process.pid), String(childPid)], {
+      detached: true,
+      stdio: "ignore",
+      windowsHide: true,
+    }).unref();
+  } catch {
+    // Best effort; normal shutdown still kills the tree.
+  }
+}
+
+/**
  * Kill a child process and its entire process tree. On Unix, when the child
  * was spawned with `detached: true`, it leads its own process group and
- * process.kill(-pid) reaches every descendant. Falls back to killing just
- * the child on Windows or when the group kill fails.
+ * process.kill(-pid) reaches every descendant. On Windows, taskkill /T walks
+ * the tree. Falls back to killing just the child when neither is possible.
  */
 export function killTree(
   child: ReturnType<typeof spawn>,
@@ -249,13 +290,15 @@ export function killTree(
     child.kill(signal);
     return;
   }
-  if (!isWindows) {
-    try {
-      process.kill(-child.pid, signal);
-      return;
-    } catch {
-      // Process group may already be gone; fall through
-    }
+  if (isWindows) {
+    killWindowsTree(child.pid);
+    return;
+  }
+  try {
+    process.kill(-child.pid, signal);
+    return;
+  } catch {
+    // Process group may already be gone; fall through
   }
   try {
     child.kill(signal);
@@ -1289,6 +1332,8 @@ export function spawnCommand(
         env,
         detached: true,
       });
+
+  if (isWindows && child.pid) watchParentOnWindows(child.pid);
 
   let exiting = false;
   let shutdownSignal: NodeJS.Signals | undefined;
