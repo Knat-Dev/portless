@@ -255,7 +255,7 @@ function killWindowsTree(pid: number): void {
  * us, so a detached watcher walks ParentProcessId links from the wrapper pid
  * (which survive the parent's exit) and only kills processes started after it.
  */
-function watchParentOnWindows(childPid: number): void {
+function watchParentOnWindows(childPid: number, spawnedAt: number): void {
   const script = `
     const { spawnSync } = require("child_process");
     const [parent, root, since] = process.argv.slice(1).map(Number);
@@ -269,7 +269,9 @@ function watchParentOnWindows(childPid: number): void {
         grew = false;
         for (const [pid, ppid] of rows) if (found.has(ppid) && !found.has(pid)) { found.add(pid); grew = true; }
       }
-      return [...found];
+      // Only kill pids seen in the snapshot with a creation time after the
+      // spawn, so a reused pid of an already-exited process is never touched.
+      return rows.map(([pid]) => pid).filter((pid) => found.has(pid));
     };
     const timer = setInterval(() => {
       if (alive(parent)) {
@@ -277,14 +279,14 @@ function watchParentOnWindows(childPid: number): void {
         return;
       }
       clearInterval(timer);
-      for (const pid of descendants()) spawnSync("taskkill", ["/T", "/F", "/PID", String(pid)], { stdio: "ignore", windowsHide: true });
+      for (const pid of descendants()) spawnSync("taskkill", ["/F", "/PID", String(pid)], { stdio: "ignore", windowsHide: true });
       process.exit(0);
     }, 500);
   `;
   try {
     spawn(
       process.execPath,
-      ["-e", script, String(process.pid), String(childPid), String(Date.now() - 1000)],
+      ["-e", script, String(process.pid), String(childPid), String(spawnedAt)],
       { detached: true, stdio: "ignore", windowsHide: true }
     ).unref();
   } catch {
@@ -1335,6 +1337,8 @@ export function spawnCommand(
     }
   }
 
+  const spawnedAt = Date.now();
+
   // On Unix, spawn detached so the child gets its own process group. This
   // lets us kill the entire tree (shell + grandchild dev server) with a
   // single process.kill(-pid, signal) instead of only the immediate child.
@@ -1349,7 +1353,7 @@ export function spawnCommand(
         detached: true,
       });
 
-  if (isWindows && child.pid) watchParentOnWindows(child.pid);
+  if (isWindows && child.pid) watchParentOnWindows(child.pid, spawnedAt);
 
   let exiting = false;
   let shutdownSignal: NodeJS.Signals | undefined;
