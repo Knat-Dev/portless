@@ -1,0 +1,101 @@
+name: Repro 437
+
+on:
+  push:
+    branches: [railly/issue-437-windows-tree-kill]
+
+permissions:
+  contents: read
+
+jobs:
+  repro:
+    name: ${{ matrix.build }} / ${{ matrix.mode }}
+    runs-on: windows-latest
+    timeout-minutes: 20
+    env:
+      PORTLESS_PORT: "1355"
+      PORTLESS_HTTPS: "0"
+    strategy:
+      fail-fast: false
+      matrix:
+        build: [published-0.13.1, branch]
+        mode: [forcekill, graceful]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24.14.0
+
+      - uses: pnpm/action-setup@v4
+
+      - name: Install published portless 0.13.1 (pnpm global, as reported)
+        if: matrix.build == 'published-0.13.1'
+        shell: pwsh
+        run: |
+          pnpm setup | Out-Null
+          $env:PNPM_HOME = "$env:LOCALAPPDATA\pnpm"; $env:Path = "$env:PNPM_HOME;$env:Path"
+          pnpm add -g portless@0.13.1
+          $cli = Join-Path (pnpm root -g) "portless\dist\cli.js"
+          if (-not (Test-Path $cli)) { throw "missing $cli" }
+          "CLI=$cli" | Out-File -Append -Encoding utf8 $env:GITHUB_ENV
+
+      - name: Build portless from this branch
+        if: matrix.build == 'branch'
+        shell: pwsh
+        run: |
+          pnpm install --frozen-lockfile
+          pnpm --filter portless build
+          "CLI=$pwd\packages\portless\dist\cli.js" | Out-File -Append -Encoding utf8 $env:GITHUB_ENV
+
+      - name: Install cuse
+        shell: pwsh
+        run: |
+          Invoke-WebRequest -Uri https://github.com/crafter-agents/cuse/releases/download/v0.2.1/cuse-windows-x64.exe -OutFile "$env:RUNNER_TEMP\cuse.exe"
+          & "$env:RUNNER_TEMP\cuse.exe" os
+
+      - name: Start proxy
+        shell: pwsh
+        run: node $env:CLI proxy start --no-tls -p 1355
+
+      - name: Run portless inside a real console
+        shell: pwsh
+        run: |
+          $out = "$env:RUNNER_TEMP\r437"; New-Item -ItemType Directory -Force $out | Out-Null
+          $script = "$pwd\.github\repro-437\console.ps1"
+          $cmd = "`$Host.UI.RawUI.WindowTitle = 'P437'; & '$script' -Cli '$env:CLI' -Out '$out' -Mode '${{ matrix.mode }}' -AppPort 4370"
+          Start-Process powershell -ArgumentList '-NoExit', '-NoProfile', '-Command', $cmd
+          for ($i = 0; $i -lt 240; $i++) {
+            if ((Test-Path "$out\result.txt") -and (Select-String -Quiet -Path "$out\result.txt" -Pattern '^(ready|error)=')) { break }
+            Start-Sleep -Milliseconds 250
+          }
+          Get-Content "$out\result.txt"
+
+      - name: Type a command into the shell with cuse
+        shell: pwsh
+        run: |
+          $cuse = "$env:RUNNER_TEMP\cuse.exe"; $out = "$env:RUNNER_TEMP\r437"
+          & $cuse focus P437
+          Start-Sleep -Milliseconds 500
+          & $cuse type "echo ok > $out\shell.txt"
+          & $cuse key Return
+          Start-Sleep -Seconds 3
+          & $cuse capture "$out\console.png"
+          "shell_ran=$(Test-Path "$out\shell.txt")" | Out-File -Append -Encoding ascii "$out\result.txt"
+
+      - name: Report
+        if: always()
+        shell: pwsh
+        run: |
+          $out = "$env:RUNNER_TEMP\r437"
+          "### ${{ matrix.build }} / ${{ matrix.mode }}" | Out-File -Append $env:GITHUB_STEP_SUMMARY
+          '```' | Out-File -Append $env:GITHUB_STEP_SUMMARY
+          Get-Content "$out\result.txt", "$out\dev.log" -ErrorAction SilentlyContinue | Tee-Object -Append -FilePath $env:GITHUB_STEP_SUMMARY
+          '```' | Out-File -Append $env:GITHUB_STEP_SUMMARY
+          Get-Process node -ErrorAction SilentlyContinue | Format-Table Id, StartTime -AutoSize
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: repro-437-${{ matrix.build }}-${{ matrix.mode }}
+          path: ${{ runner.temp }}/r437
