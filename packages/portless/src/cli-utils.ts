@@ -255,7 +255,10 @@ function killWindowsTree(pid: number): void {
  * us, so a detached watcher walks ParentProcessId links from the wrapper pid
  * (which survive the parent's exit) and only kills processes started after it.
  */
-function watchParentOnWindows(childPid: number, spawnedAt: number): void {
+function watchParentOnWindows(
+  childPid: number,
+  spawnedAt: number
+): ReturnType<typeof spawn> | undefined {
   const script = `
     const { spawnSync } = require("child_process");
     const [parent, root, since] = process.argv.slice(1).map(Number);
@@ -284,13 +287,17 @@ function watchParentOnWindows(childPid: number, spawnedAt: number): void {
     }, 500);
   `;
   try {
-    spawn(
+    // Run outside the user's cwd so the watcher never holds that directory open.
+    const watcher = spawn(
       process.execPath,
       ["-e", script, String(process.pid), String(childPid), String(spawnedAt)],
-      { detached: true, stdio: "ignore", windowsHide: true }
-    ).unref();
+      { cwd: path.dirname(process.execPath), detached: true, stdio: "ignore", windowsHide: true }
+    );
+    watcher.unref();
+    return watcher;
   } catch {
     // Best effort; normal shutdown still kills the tree.
+    return undefined;
   }
 }
 
@@ -1353,7 +1360,9 @@ export function spawnCommand(
         detached: true,
       });
 
-  if (isWindows && child.pid) watchParentOnWindows(child.pid, spawnedAt);
+  // The watcher is only needed if we die without cleanup; stop it on a normal exit.
+  const watcher = isWindows && child.pid ? watchParentOnWindows(child.pid, spawnedAt) : undefined;
+  if (watcher) process.once("exit", () => watcher.kill());
 
   let exiting = false;
   let shutdownSignal: NodeJS.Signals | undefined;
