@@ -1230,7 +1230,8 @@ function collectBinPaths(cwd: string): string[] {
 }
 
 /**
- * Build a PATH string with `node_modules/.bin` directories prepended.
+ * Build a PATH string with `node_modules/.bin` directories prepended and the
+ * running node's directory appended as a fallback.
  */
 export function augmentedPath(env: NodeJS.ProcessEnv | undefined, cwd?: string): string {
   const source = env ?? process.env;
@@ -1240,9 +1241,11 @@ export function augmentedPath(env: NodeJS.ProcessEnv | undefined, cwd?: string):
   const bins = collectBinPaths(cwd ?? process.cwd());
   // Ensure node's own directory is in PATH so .cmd wrappers in node_modules/.bin
   // can locate the node executable (fixes Windows "node not recognized" errors).
+  // It goes last, as a fallback: ahead of the caller's PATH it would shadow the
+  // node (and anything installed beside it) that a version manager such as
+  // asdf, nvm, fnm or mise put first.
   const nodeBin = path.dirname(process.execPath);
-  const allBins = [...bins, nodeBin];
-  return allBins.join(path.delimiter) + path.delimiter + base;
+  return [...bins, base, nodeBin].filter(Boolean).join(path.delimiter);
 }
 
 /**
