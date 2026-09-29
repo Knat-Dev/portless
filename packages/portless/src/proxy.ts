@@ -36,6 +36,17 @@ const HOP_BY_HOP_HEADERS = new Set([
 ]);
 
 /**
+ * Hop-by-hop headers that manage the client's connection to the proxy, stripped
+ * from plain requests before they are forwarded to the backend. The backend
+ * connection is the proxy's own, so the client's `Connection: keep-alive` must
+ * not decide its lifetime. `transfer-encoding` is deliberately kept: it frames
+ * the body being streamed through, and Node only chunk-encodes a GET, DELETE or
+ * OPTIONS body when the header asks for it. The WebSocket upgrade paths keep
+ * all of them, since there `Connection` and `Upgrade` are the handshake.
+ */
+const REQUEST_HOP_BY_HOP_HEADERS = ["connection", "keep-alive", "proxy-connection", "upgrade"];
+
+/**
  * Get the effective host value from a request.
  * HTTP/2 uses the :authority pseudo-header; HTTP/1.1 uses Host.
  */
@@ -343,6 +354,13 @@ export function createProxyServer(options: ProxyServerOptions): ProxyServer {
       if (key.startsWith(":")) {
         delete proxyReqHeaders[key];
       }
+    }
+    // A forwarded `Connection: keep-alive` makes the backend request keep its
+    // socket open after the response. With no agent to adopt that socket, it
+    // is left without an error listener, so a backend restart resetting it
+    // crashed the whole proxy with an unhandled ECONNRESET.
+    for (const h of REQUEST_HOP_BY_HOP_HEADERS) {
+      delete proxyReqHeaders[h];
     }
     // HTTP/2 carries the hostname only in :authority (stripped above); restore
     // it as Host so Host-dependent backends (multi-tenant vhosts, framework

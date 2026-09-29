@@ -639,6 +639,122 @@ describe("createProxyServer", () => {
       expect(errors.length).toBeGreaterThan(0);
       expect(errors[0]).toContain("dead.localhost");
     });
+
+    it("does not forward client hop-by-hop headers to the backend", async () => {
+      const backend = trackServer(
+        http.createServer((req, res) => {
+          res.writeHead(200, { "Content-Type": "application/json" });
+          res.end(
+            JSON.stringify({
+              connection: req.headers["connection"],
+              keepAlive: req.headers["keep-alive"],
+              proxyConnection: req.headers["proxy-connection"],
+            })
+          );
+        })
+      );
+      await listen(backend);
+      const backendAddr = backend.address();
+      if (!backendAddr || typeof backendAddr === "string") throw new Error("no addr");
+
+      const routes: RouteInfo[] = [{ hostname: "myapp.localhost", port: backendAddr.port }];
+      const server = trackServer(
+        createProxyServer({ getRoutes: () => routes, proxyPort: TEST_PROXY_PORT })
+      );
+      await listen(server);
+
+      const res = await request(server, {
+        host: "myapp.localhost",
+        headers: {
+          connection: "keep-alive",
+          "keep-alive": "timeout=5",
+          "proxy-connection": "keep-alive",
+        },
+      });
+      expect(res.status).toBe(200);
+      const seen = JSON.parse(res.body);
+      expect(seen.connection).not.toBe("keep-alive");
+      expect(seen.keepAlive).toBeUndefined();
+      expect(seen.proxyConnection).toBeUndefined();
+    });
+
+    it("survives a backend resetting a kept-alive connection", async () => {
+      const sockets = new Set<net.Socket>();
+      const backend = trackServer(
+        http.createServer((_req, res) => {
+          res.writeHead(200, { "Content-Type": "text/plain" });
+          res.end("ok");
+        })
+      );
+      backend.on("connection", (socket: net.Socket) => sockets.add(socket));
+      await listen(backend);
+      const backendAddr = backend.address();
+      if (!backendAddr || typeof backendAddr === "string") throw new Error("no addr");
+
+      const routes: RouteInfo[] = [{ hostname: "myapp.localhost", port: backendAddr.port }];
+      const server = trackServer(
+        createProxyServer({ getRoutes: () => routes, proxyPort: TEST_PROXY_PORT })
+      );
+      await listen(server);
+
+      const first = await request(server, {
+        host: "myapp.localhost",
+        headers: { connection: "keep-alive" },
+      });
+      expect(first.status).toBe(200);
+
+      // What a backend restart does to the connections it was holding.
+      for (const socket of sockets) socket.resetAndDestroy();
+      await new Promise((resolve) => setTimeout(resolve, 100));
+
+      const second = await request(server, { host: "myapp.localhost" });
+      expect(second.status).toBe(200);
+      expect(second.body).toBe("ok");
+    });
+    it("still forwards a chunked request body for methods Node does not chunk by default", async () => {
+      const backend = trackServer(
+        http.createServer((req, res) => {
+          let body = "";
+          req.on("data", (chunk) => (body += chunk));
+          req.on("end", () => {
+            res.writeHead(200, { "Content-Type": "text/plain" });
+            res.end(body);
+          });
+        })
+      );
+      await listen(backend);
+      const backendAddr = backend.address();
+      if (!backendAddr || typeof backendAddr === "string") throw new Error("no addr");
+
+      const routes: RouteInfo[] = [{ hostname: "myapp.localhost", port: backendAddr.port }];
+      const server = trackServer(
+        createProxyServer({ getRoutes: () => routes, proxyPort: TEST_PROXY_PORT })
+      );
+      await listen(server);
+      const proxyAddr = server.address();
+      if (!proxyAddr || typeof proxyAddr === "string") throw new Error("no addr");
+
+      const body = await new Promise<string>((resolve, reject) => {
+        const req = http.request(
+          {
+            hostname: "127.0.0.1",
+            port: proxyAddr.port,
+            method: "DELETE",
+            path: "/",
+            headers: { host: "myapp.localhost", "transfer-encoding": "chunked" },
+          },
+          (res) => {
+            let received = "";
+            res.on("data", (chunk) => (received += chunk));
+            res.on("end", () => resolve(received));
+          }
+        );
+        req.on("error", reject);
+        req.write("hello ");
+        req.end("world");
+      });
+      expect(body).toBe("hello world");
+    });
   });
 
   describe("X-Portless header", () => {
