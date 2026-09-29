@@ -153,6 +153,24 @@ describe("findFreePort", () => {
     }
   });
 
+  it.for(["127.0.0.1", "::1", "0.0.0.0", "::"])(
+    "treats a port held on %s as occupied",
+    async (host, { skip }) => {
+      const server = net.createServer();
+      const bound = await new Promise<boolean>((resolve) => {
+        server.once("error", () => resolve(false));
+        server.listen(9997, host, () => resolve(true));
+      });
+      // A machine without this address family (e.g. no IPv6 loopback) cannot hold it.
+      if (!bound) return skip();
+      try {
+        await expect(findFreePort(9997, 9997)).rejects.toThrow("No free port found");
+      } finally {
+        server.close();
+      }
+    }
+  );
+
   it("throws when minPort > maxPort", async () => {
     await expect(findFreePort(5000, 4000)).rejects.toThrow("minPort");
   });

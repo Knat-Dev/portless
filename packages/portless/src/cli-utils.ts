@@ -839,6 +839,14 @@ export async function discoverState(): Promise<{
 // ---------------------------------------------------------------------------
 
 /**
+ * Addresses an app port must be free on before it is assigned. The proxy dials
+ * apps on both loopbacks, and a probe on one address does not see a listener on
+ * another: on macOS a hostless bind succeeds while `127.0.0.1` or `0.0.0.0`
+ * holds the port, and a loopback bind succeeds while a wildcard holds it.
+ */
+const APP_PORT_PROBE_HOSTS = ["127.0.0.1", "::1", "0.0.0.0", "::"];
+
+/**
  * Find a free port in the given range (default 4000-4999).
  * Tries random ports first for speed, then falls back to sequential scan.
  *
@@ -854,14 +862,27 @@ export async function findFreePort(
     throw new Error(`minPort (${minPort}) must be <= maxPort (${maxPort})`);
   }
 
-  const tryPort = (port: number): Promise<boolean> => {
+  const isFreeOn = (port: number, host: string): Promise<boolean> => {
     return new Promise((resolve) => {
       const server = net.createServer();
-      server.listen(port, () => {
+      server.once("error", (err: NodeJS.ErrnoException) => {
+        // An address family this machine lacks (an IPv4-only or IPv6-only
+        // host) cannot hold the port, so it does not make the port busy.
+        resolve(err.code === "EADDRNOTAVAIL" || err.code === "EAFNOSUPPORT");
+      });
+      server.listen(port, host, () => {
         server.close(() => resolve(true));
       });
-      server.on("error", () => resolve(false));
     });
+  };
+
+  // One address at a time: the probes would otherwise collide with each other
+  // (a dual-stack `::` bind conflicts with `0.0.0.0`) and report free ports busy.
+  const tryPort = async (port: number): Promise<boolean> => {
+    for (const host of APP_PORT_PROBE_HOSTS) {
+      if (!(await isFreeOn(port, host))) return false;
+    }
+    return true;
   };
 
   // Try random ports first
