@@ -251,6 +251,49 @@ describe("createProxyServer", () => {
       expect(res.body).toBe("exact");
     });
 
+    it("routes wildcard subdomain to the most specific parent route regardless of order", async () => {
+      const parentBackend = trackServer(
+        http.createServer((_req, res) => {
+          res.writeHead(200, { "Content-Type": "text/plain" });
+          res.end("parent");
+        })
+      );
+      await listen(parentBackend);
+      const parentAddr = parentBackend.address();
+      if (!parentAddr || typeof parentAddr === "string") throw new Error("no addr");
+
+      const childBackend = trackServer(
+        http.createServer((_req, res) => {
+          res.writeHead(200, { "Content-Type": "text/plain" });
+          res.end("child");
+        })
+      );
+      await listen(childBackend);
+      const childAddr = childBackend.address();
+      if (!childAddr || typeof childAddr === "string") throw new Error("no addr");
+
+      const parent: RouteInfo = { hostname: "acme.localhost", port: parentAddr.port };
+      const child: RouteInfo = { hostname: "api.acme.localhost", port: childAddr.port };
+
+      for (const routes of [
+        [parent, child],
+        [child, parent],
+      ]) {
+        const server = trackServer(
+          createProxyServer({
+            getRoutes: () => routes,
+            proxyPort: TEST_PROXY_PORT,
+            strict: false,
+          })
+        );
+        await listen(server);
+
+        const res = await request(server, { host: "admin.api.acme.localhost" });
+        expect(res.status).toBe(200);
+        expect(res.body).toBe("child");
+      }
+    });
+
     it("returns 404 when subdomain does not match any route", async () => {
       const routes: RouteInfo[] = [{ hostname: "myapp.localhost", port: 4001 }];
       const server = trackServer(

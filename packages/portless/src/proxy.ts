@@ -191,7 +191,11 @@ function normalizeAuthority(host: string): string {
  * order: local hostname, tailscale authority (hostname and port), tailscale
  * hostname ignoring port, then wildcard subdomain. The authority tier
  * disambiguates apps sharing a `.ts.net` hostname on different ports; the
- * hostname tier keeps other-port requests resolving. `strict` drops the wildcard.
+ * hostname tier keeps other-port requests resolving. The wildcard tier picks the
+ * most specific parent (the longest registered hostname the request is a
+ * subdomain of), so nested routes such as `acme.localhost` and
+ * `api.acme.localhost` resolve the same way whatever order they are stored in.
+ * `strict` drops the wildcard.
  * All comparisons run against the normalized authority so they are
  * case-insensitive and treat an explicit `:443` as the default HTTPS port.
  */
@@ -206,7 +210,16 @@ function findRoute(
     routes.find((r) => r.hostname.toLowerCase() === hostname) ||
     routes.find((r) => tailscaleAuthority(r.tailscaleUrl) === authority) ||
     routes.find((r) => tailscaleAuthority(r.tailscaleUrl)?.split(":")[0] === hostname) ||
-    (strict ? undefined : routes.find((r) => hostname.endsWith("." + r.hostname.toLowerCase())))
+    (strict
+      ? undefined
+      : routes.reduce<(typeof routes)[number] | undefined>(
+          (best, r) =>
+            hostname.endsWith("." + r.hostname.toLowerCase()) &&
+            (!best || r.hostname.length > best.hostname.length)
+              ? r
+              : best,
+          undefined
+        ))
   );
 }
 
