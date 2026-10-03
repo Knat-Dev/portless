@@ -178,8 +178,9 @@ portless proxy start
       <td>`--unprivileged`</td>
       <td>
         Take a port below 1024 without sudo: bind the wildcard address and accept loopback peers
-        only. Serves plain HTTP on port 80 unless `--https` is given. Remembered for auto-start.
-        On Linux, requires `net.ipv4.ip_unprivileged_port_start` to cover the port.
+        only. Serves plain HTTP on port 80 unless `--https` is given, never writes the hosts file,
+        and is remembered for auto-start. On Linux, requires `net.ipv4.ip_unprivileged_port_start`
+        to cover the port.
       </td>
     </tr>
     <tr>

@@ -1976,6 +1976,40 @@ describe("CLI", () => {
       expect(start.stdout + start.stderr).not.toContain("Adding CA to system trust store");
     }, 30_000);
 
+    it("never writes the hosts file in unprivileged mode", async () => {
+      const start = run(["proxy", "start", "--unprivileged"], { env: proxyEnv() });
+      expect(start.status).toBe(0);
+      await waitForHttpHeader(testPort, "X-Portless", "1");
+
+      // A new route is what makes the daemon sync the hosts file. The alias
+      // command waits for the daemon's answer to its sync request, and the
+      // daemon logs any write failure before answering, so no wait is needed.
+      const alias = run(["alias", "hostsless", "4567"], { env: proxyEnv() });
+      expect(alias.status).toBe(0);
+
+      const log = fs.readFileSync(path.join(tmpDir, "proxy.log"), "utf-8");
+      expect(log).not.toContain("Could not write");
+    });
+
+    it("refuses PORTLESS_SYNC_HOSTS=1 together with --unprivileged", () => {
+      const start = run(["proxy", "start", "--unprivileged"], {
+        env: { ...proxyEnv(), PORTLESS_SYNC_HOSTS: "1" },
+      });
+      expect(start.status).toBe(1);
+      expect(start.stderr).toContain("cannot be combined with unprivileged mode");
+      expect(start.stderr).toContain("portless hosts sync");
+    });
+
+    it("says up front that a custom TLD needs hosts entries in unprivileged mode", async () => {
+      const start = run(["proxy", "start", "--unprivileged", "--tld", "test"], {
+        env: proxyEnv(),
+      });
+      expect(start.status).toBe(0);
+      expect(start.stdout + start.stderr).toContain("Hosts sync is disabled");
+      expect(start.stdout + start.stderr).toContain("portless hosts sync");
+      await waitForHttpHeader(testPort, "X-Portless", "1");
+    });
+
     it("keeps binding loopback only without the flag", async () => {
       const start = run(["proxy", "start"], { env: proxyEnv() });
       expect(start.status).toBe(0);

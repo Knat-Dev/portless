@@ -630,7 +630,9 @@ function startProxyServer(
   let watcher: fs.FSWatcher | null = null;
   let pollingInterval: ReturnType<typeof setInterval> | null = null;
 
-  const autoSyncHosts = shouldAutoSyncHosts(process.env.PORTLESS_SYNC_HOSTS);
+  // Writing the hosts file needs root, which unprivileged mode never has, so
+  // it does not try; `proxy start` refuses an explicit PORTLESS_SYNC_HOSTS=1.
+  const autoSyncHosts = !unprivileged && shouldAutoSyncHosts(process.env.PORTLESS_SYNC_HOSTS);
   const hostsSyncToken = generateHostsSyncToken();
 
   const onMdnsError = (msg: string) => console.warn(chalk.yellow(msg));
@@ -1993,7 +1995,8 @@ ${colors.bold("Options:")}
                                 unless --unprivileged is set
   --unprivileged                Take a port below 1024 without sudo: bind the wildcard
                                 address and accept loopback peers only. Serves plain
-                                HTTP on port 80 unless --https is also given
+                                HTTP on port 80 unless --https is also given, and
+                                never writes the hosts file
   --no-tls                      Disable HTTPS (use plain HTTP on port 80)
   --https                       Enable HTTPS (default, accepted for compatibility)
   --lan                         Enable LAN mode (mDNS .local, for real device testing)
@@ -3199,8 +3202,28 @@ ${colors.bold("LAN mode (--lan):")}
     }
   }
 
+  const syncExplicitlyOn =
+    process.env.PORTLESS_SYNC_HOSTS === "1" || process.env.PORTLESS_SYNC_HOSTS === "true";
+  if (desiredUnprivileged && syncExplicitlyOn) {
+    console.error(
+      colors.red("Error: PORTLESS_SYNC_HOSTS=1 cannot be combined with unprivileged mode.")
+    );
+    console.error(
+      colors.blue(`Writing ${HOSTS_DISPLAY} needs root, which unprivileged mode never asks for.`)
+    );
+    console.error(
+      colors.blue(
+        "Unset PORTLESS_SYNC_HOSTS, or start without --unprivileged. To add entries once:"
+      )
+    );
+    console.error(colors.cyan("  portless hosts sync"));
+    process.exit(1);
+  }
+
   const syncDisabled =
-    process.env.PORTLESS_SYNC_HOSTS === "0" || process.env.PORTLESS_SYNC_HOSTS === "false";
+    desiredUnprivileged ||
+    process.env.PORTLESS_SYNC_HOSTS === "0" ||
+    process.env.PORTLESS_SYNC_HOSTS === "false";
   const nonDefaultTlds = tlds.filter((configuredTld) => configuredTld !== DEFAULT_TLD);
   if (nonDefaultTlds.length > 0 && !lanMode && syncDisabled) {
     console.warn(
