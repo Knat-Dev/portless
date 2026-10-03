@@ -1954,6 +1954,28 @@ describe("CLI", () => {
       expect(fs.existsSync(path.join(tmpDir, "proxy.unprivileged"))).toBe(true);
     });
 
+    it("serves plain HTTP in unprivileged mode unless HTTPS is explicit", async () => {
+      const start = run(["proxy", "start", "--unprivileged"], {
+        env: { ...proxyEnv(), PORTLESS_HTTPS: undefined },
+      });
+      expect(start.status).toBe(0);
+      await waitForHttpHeader(testPort, "X-Portless", "1");
+      expect(fs.existsSync(path.join(tmpDir, "proxy.tls"))).toBe(false);
+      expect(fs.readFileSync(path.join(tmpDir, "proxy.log"), "utf-8")).toContain(
+        `HTTP proxy listening on 0.0.0.0:${testPort}`
+      );
+    });
+
+    it("keeps HTTPS in unprivileged mode when asked, without touching the trust store", async () => {
+      const start = run(["proxy", "start", "--unprivileged", "--https"], {
+        env: { ...proxyEnv(), PORTLESS_HTTPS: undefined },
+      });
+      expect(start.status).toBe(0);
+      await waitForHttpHeader(testPort, "X-Portless", "1");
+      expect(fs.existsSync(path.join(tmpDir, "proxy.tls"))).toBe(true);
+      expect(start.stdout + start.stderr).not.toContain("Adding CA to system trust store");
+    }, 30_000);
+
     it("keeps binding loopback only without the flag", async () => {
       const start = run(["proxy", "start"], { env: proxyEnv() });
       expect(start.status).toBe(0);

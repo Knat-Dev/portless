@@ -275,6 +275,12 @@ function resolveProxyConfig(options: {
     config.unprivileged = options.unprivileged;
   }
 
+  // Unprivileged mode promises no prompt of any kind, and trusting a
+  // generated CA is one. So it serves plain HTTP unless HTTPS was asked for.
+  if (config.unprivileged && !options.explicit.useHttps && !options.explicit.customCert) {
+    config.useHttps = false;
+  }
+
   if (!config.lanMode) {
     config.lanIp = null;
     config.lanIpExplicit = false;
@@ -1986,7 +1992,8 @@ ${colors.bold("Options:")}
                                 Standard ports auto-elevate with sudo on macOS/Linux
                                 unless --unprivileged is set
   --unprivileged                Take a port below 1024 without sudo: bind the wildcard
-                                address and accept loopback peers only
+                                address and accept loopback peers only. Serves plain
+                                HTTP on port 80 unless --https is also given
   --no-tls                      Disable HTTPS (use plain HTTP on port 80)
   --https                       Enable HTTPS (default, accepted for compatibility)
   --lan                         Enable LAN mode (mDNS .local, for real device testing)
@@ -3002,7 +3009,7 @@ ${colors.bold("Usage:")}
   ${colors.cyan("portless proxy start --lan")}          Enable LAN mode (mDNS, .local TLD)
   ${colors.cyan("portless proxy start --foreground")}   Start in foreground (for debugging)
   ${colors.cyan("portless proxy start -p 1355")}        Start on a custom port (no sudo)
-  ${colors.cyan("portless proxy start --no-tls --unprivileged")}  Plain HTTP on port 80, no sudo
+  ${colors.cyan("portless proxy start --unprivileged")}  Plain HTTP on port 80, no sudo, nothing installed
   ${colors.cyan("portless proxy start --tld test")}     Use .test instead of .localhost
   ${colors.cyan("portless proxy start --tld localhost --tld test")}  Serve both TLDs
   ${colors.cyan("portless proxy start --tld dev.example.com")}  Use a multi-segment TLD (production parity)
@@ -3422,7 +3429,16 @@ ${colors.bold("LAN mode (--lan):")}
         console.log(colors.green("Generated local CA certificate."));
       }
 
-      if (!skipTrust && !isCATrusted(stateDir)) {
+      if (desiredUnprivileged && !isCATrusted(stateDir)) {
+        // Installing the CA elevates, which this mode never does.
+        console.warn(colors.yellow("The portless CA is not in the system trust store."));
+        console.warn(
+          colors.yellow(
+            "Browsers will show certificate warnings. Trust it once (asks for admin rights):"
+          )
+        );
+        console.warn(colors.cyan("  portless trust"));
+      } else if (!skipTrust && !isCATrusted(stateDir)) {
         console.log(colors.yellow("Adding CA to system trust store..."));
         const trustResult = trustCA(stateDir);
         if (trustResult.trusted) {

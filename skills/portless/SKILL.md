@@ -169,7 +169,7 @@ period.
 
 Outside LAN mode, the proxy and its HTTP redirect listener bind only to the IPv4 and IPv6 loopback addresses, `127.0.0.1` and `::1`. They do not accept connections through LAN, VPN, or other network interfaces.
 
-With `--unprivileged` (or `PORTLESS_UNPRIVILEGED=1`) the proxy takes a port below 1024 without `sudo`: it binds the wildcard addresses, which macOS allows for non-root processes, and refuses every non-loopback peer itself. Linux needs `net.ipv4.ip_unprivileged_port_start` to cover the port; portless checks and prints the sysctl command instead of falling back to another port. The mode is remembered for auto-start and never triggers a sudo prompt, so it suits scripts, agents and managed machines.
+With `--unprivileged` (or `PORTLESS_UNPRIVILEGED=1`) the proxy takes a port below 1024 without `sudo`: it binds the wildcard addresses, which macOS allows for non-root processes, and refuses every non-loopback peer itself. It serves plain HTTP on port 80 unless `--https` is given, because installing the CA would be a prompt; with `--https` the CA is generated but not installed, so run `portless trust` once yourself. Linux needs `net.ipv4.ip_unprivileged_port_start` to cover the port; portless checks and prints the sysctl command instead of falling back to another port. The mode is remembered for auto-start and never triggers a sudo prompt, so it suits scripts, agents and managed machines.
 
 `.localhost` domains resolve to `127.0.0.1` natively in Chrome, Firefox, and Edge. Safari relies on the system DNS resolver, which may not handle `.localhost` subdomains on all configurations. Run `portless hosts sync` to add entries to `/etc/hosts` if needed.
 
@@ -307,7 +307,7 @@ The chosen service configuration is written into launchd, systemd, or Task Sched
 | `portless proxy start --no-tls`                   | Start without HTTPS (plain HTTP on port 80)                    |
 | `portless proxy start --lan`                      | Start in LAN mode (mDNS `.local`, auto-follows LAN IP changes) |
 | `portless proxy start -p <number>`                | Start the proxy on a custom port                               |
-| `portless proxy start --no-tls --unprivileged`    | Port 80 without sudo (wildcard bind, loopback peers only)      |
+| `portless proxy start --unprivileged`             | Plain HTTP on port 80 without sudo, nothing installed          |
 | `portless proxy start --tld test`                 | Use .test instead of .localhost                                |
 | `portless proxy start --tld localhost --tld test` | Serve both TLDs from one proxy                                 |
 | `portless proxy start --tld dev.example.com`      | Use a multi-segment TLD for production-parity URLs             |
@@ -406,7 +406,7 @@ The default ports (80 for HTTP, 443 for HTTPS) require `sudo` on macOS and Linux
 ```bash
 portless proxy start --https           # Auto-elevates with sudo for port 443
 portless proxy start -p 1355 --https   # No sudo needed (URLs include :1355)
-portless proxy start --no-tls --unprivileged  # Port 80, no sudo, clean URLs
+portless proxy start --unprivileged    # Plain HTTP on port 80, no sudo, clean URLs
 portless proxy stop                    # Stop (use sudo if started with sudo)
 ```
 
