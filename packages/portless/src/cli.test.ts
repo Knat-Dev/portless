@@ -1928,6 +1928,42 @@ describe("CLI", () => {
       expect(stop.stdout).toContain("Proxy stopped");
     });
 
+    it("binds the wildcard address and remembers the mode with --unprivileged", async () => {
+      const start = run(["proxy", "start", "--unprivileged"], { env: proxyEnv() });
+      expect(start.status).toBe(0);
+      await waitForHttpHeader(testPort, "X-Portless", "1");
+
+      expect(fs.existsSync(path.join(tmpDir, "proxy.unprivileged"))).toBe(true);
+      const log = fs.readFileSync(path.join(tmpDir, "proxy.log"), "utf-8");
+      expect(log).toContain(`listening on 0.0.0.0:${testPort}`);
+      expect(log).toContain("(unprivileged, loopback peers only)");
+
+      const stop = run(["proxy", "stop"], { env: proxyEnv() });
+      expect(stop.status).toBe(0);
+      // Like the TLS and LAN markers, the mode survives a stop so the next
+      // auto-start reuses it.
+      expect(fs.existsSync(path.join(tmpDir, "proxy.unprivileged"))).toBe(true);
+    });
+
+    it("reads unprivileged mode from PORTLESS_UNPRIVILEGED", async () => {
+      const start = run(["proxy", "start"], {
+        env: { ...proxyEnv(), PORTLESS_UNPRIVILEGED: "1" },
+      });
+      expect(start.status).toBe(0);
+      await waitForHttpHeader(testPort, "X-Portless", "1");
+      expect(fs.existsSync(path.join(tmpDir, "proxy.unprivileged"))).toBe(true);
+    });
+
+    it("keeps binding loopback only without the flag", async () => {
+      const start = run(["proxy", "start"], { env: proxyEnv() });
+      expect(start.status).toBe(0);
+      await waitForHttpHeader(testPort, "X-Portless", "1");
+      const log = fs.readFileSync(path.join(tmpDir, "proxy.log"), "utf-8");
+      expect(log).toContain(`listening on 127.0.0.1:${testPort}`);
+      expect(log).not.toContain("unprivileged");
+      expect(fs.existsSync(path.join(tmpDir, "proxy.unprivileged"))).toBe(false);
+    });
+
     it("accepts connections on IPv6 loopback when available", async (ctx) => {
       const ipv6Probe = http.createServer();
       const ipv6Available = await new Promise<boolean>((resolve, reject) => {
